@@ -15,6 +15,8 @@
 - Chỉ `__main__.py` (composition root) chọn adapter theo `sys.platform` và tiêm vào engine.
 - Code ngoài `adapters/` không import `ctypes`, `winreg`, `win32*`, `objc`, `AppKit`, `Foundation`,
   `msvcrt`. Test `tests/test_architecture.py` kiểm tra quy tắc này bằng AST.
+- Windows: trigger là `QClipboard.dataChanged` (`adapters/qt_notifier.py`); bytes được đọc bằng ctypes
+  (`adapters/windows/clipboard.py`), không qua `QMimeData`.
 - Luồng: OS báo đổi clipboard → adapter đọc nhanh các định dạng trong allowlist thành `Snapshot`
   (trên UI thread, giữ clipboard càng ngắn càng tốt) → engine đẩy sang 1 worker thread ghi duy nhất:
   kiểm tra giới hạn → hash → dedupe → storage → classifier → phát signal cho ui.
@@ -76,6 +78,10 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ```
 Đổi schema = tăng `user_version` + migration có test; phải được duyệt trước (CLAUDE.md).
 
+**Quy ước `tags`** (Phase 2, không đổi schema): `url|email|color|path|code` (tín hiệu nội dung), `lang:<tên>` (ngôn ngữ code),
+`cat:<image|text|link|code|other>` (danh mục hiển thị, mỗi mục đúng một), `manual` (người dùng đã Change Type; phân loại lại
+không đè `cat:*`). `kind` giữ nguyên nghĩa: text | rich | image | files | other. Truy vấn theo danh mục = `EXISTS tag 'cat:x'`.
+
 ## 4. Lưu đa định dạng (hybrid)
 - Mỗi representation → 1 blob định danh theo SHA-256 của bytes (content-addressed, tự dedupe
   giữa các mục, vd. cùng một ảnh copy từ hai app).
@@ -112,11 +118,11 @@ ClipVault/
   src/clipvault/
     __init__.py  __main__.py         # composition root
     core/        model.py ports.py limits.py paths.py
-    engine/      capture.py dedupe.py retention.py paste.py
+    engine/      capture.py dedupe.py retention.py paste.py history.py reclassify.py
     classifier/  rules.py            # classify(snapshot) -> (kind, tags); không sửa input
     storage/     db.py schema.py blobstore.py
-    ui/          app.py widgets/ …
-    adapters/windows/  clipboard.py hotkey.py   # ctypes Win32
+    ui/          app.py main_window.py models.py delegate.py preview.py images.py tray.py format.py
+    adapters/windows/  clipboard.py hotkey.py   # ctypes Win32 (đọc, ghi/Copy, RegisterHotKey)
     adapters/macos/    clipboard.py hotkey.py   # Phase 6
   tests/
 ```
