@@ -162,15 +162,19 @@ class SettingsDialog(QDialog):
         self.delete_button.clicked.connect(self.delete_data)
         self.reset_button.clicked.connect(self.reset_defaults)
         self.prefs.changed.connect(self._on_prefs_changed)
+        self._prefs_connected = True
 
     def _on_prefs_changed(self, _diff) -> None:
         self._sync()
 
     def _disconnect_prefs(self) -> None:
+        if not self._prefs_connected:
+            return
+        self._prefs_connected = False
         try:
             self.prefs.changed.disconnect(self._on_prefs_changed)
         except (RuntimeError, TypeError):
-            pass  # đã ngắt rồi
+            pass
 
     def done(self, result: int) -> None:
         self._disconnect_prefs()

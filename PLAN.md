@@ -1,4 +1,4 @@
-# PLAN — phase hiện tại: 3
+# PLAN — phase hiện tại: 5
 
 ## Lệnh
 - Test: `.venv\Scripts\python -m pytest -q`
@@ -31,9 +31,25 @@ Chi tiết: docs/ARCHITECTURE.md.
 - [x] 1 Clipboard engine (Windows)
 - [x] 2 Classifier
 - [x] 3 UI
-- [ ] 4 Rà soát bảo mật
-- [ ] 5 Đóng gói Windows
+- [x] 4 Rà soát bảo mật
+- [x] 5 Đóng gói Windows
 - [ ] 6 macOS
+
+## Phase 4 — rà soát bảo mật (tests/test_security.py)
+- Sửa: nội dung đã xóa còn trong clipvault.db/-wal → `PRAGMA secure_delete=ON` + checkpoint(TRUNCATE) sau mỗi lần xóa;
+  `BlobStore` chỉ nhận tên SHA-256 hex (chặn `../`); nhãn preview dùng PlainText.
+- Đã khóa bằng test (không phải sửa): log/lỗi không chứa nội dung, không import mạng/subprocess/eval, SQL tham số hóa,
+  ảnh "bom" PNG/DIB bị Qt từ chối, openUrl chỉ cho thư mục cục bộ, data dir không nằm trong mã nguồn.
+- Giới hạn còn lại: DB/blob không mã hóa (quyết định v1; bảo vệ bằng ACL thư mục %LOCALAPPDATA% của user); file blob đã xóa chỉ bị
+  unlink, không ghi đè (SSD/hệ thống file không đảm bảo); mục tạm dừng/bị bỏ qua vẫn có thể nằm trong clipboard hệ thống (Win+V);
+  chưa chạy công cụ quét phụ thuộc (pip-audit) vì chưa duyệt thêm thư viện.
+
+## Phase 5 — đóng gói Windows (packaging/)
+- Build: `powershell -ExecutionPolicy Bypass -File packaginguild.ps1` → `dist\ClipVault-Setup-<version>.exe` (PyInstaller onedir → Inno Setup 6).
+  Công cụ build: `pip install -e ".[build]"` (pyinstaller, extra mới, không phải dependency chạy app) + Inno Setup 6.
+- Trình cài đặt theo từng người dùng (không cần admin), tùy chọn shortcut desktop và chạy cùng Windows (`--background`); gỡ cài đặt KHÔNG xóa
+  dữ liệu ở %LOCALAPPDATA%\ClipVault. Đã thử: exe đóng gói chạy được; cài/gỡ im lặng vào thư mục tạm sạch.
+- Chưa làm: ký số (SmartScreen sẽ cảnh báo "unknown publisher"), tự cập nhật, bản cài đặt đa ngôn ngữ, chưa thử trên máy Windows sạch/Win10.
 
 ## Nợ kỹ thuật / ghi chú
 - Máy dev có Python 3.12.10 (CLAUDE.md ghi 3.12); `requires-python >=3.11` giữ nguyên, chưa test trên 3.11.

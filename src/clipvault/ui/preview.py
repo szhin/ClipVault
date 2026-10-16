@@ -77,8 +77,10 @@ class PreviewPanel(QWidget):
         self.badge.setFixedSize(BADGE, BADGE)
         self.title = QLabel()
         self.title.setObjectName("title")
+        self.title.setTextFormat(Qt.TextFormat.PlainText)  # không bao giờ hiểu dữ liệu là HTML
         self.meta = QLabel()
         self.meta.setObjectName("meta")
+        self.meta.setTextFormat(Qt.TextFormat.PlainText)
         self.meta.setWordWrap(True)
         titles = QVBoxLayout()
         titles.setSpacing(theme.sp(0))
@@ -100,6 +102,7 @@ class PreviewPanel(QWidget):
         self.image_view.setAccessibleName("Preview image")
         self.message = QLabel()
         self.message.setObjectName("previewMessage")
+        self.message.setTextFormat(Qt.TextFormat.PlainText)
         self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message.setWordWrap(True)
 

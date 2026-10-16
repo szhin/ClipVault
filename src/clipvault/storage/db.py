@@ -76,6 +76,13 @@ class Database:
             except sqlite3.Error as exc:
                 raise StorageError(f"write failed: {type(exc).__name__}") from None
 
+    def _scrub(self) -> None:
+        """Sau khi xóa: checkpoint + cắt WAL để bản sao cũ của trang đã xóa không còn trên đĩa."""
+        try:
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass  # đang có reader: lần checkpoint tự động sau sẽ dọn
+
     # --- ghi ---------------------------------------------------------------------------------
 
     def find_item(self, item_hash: bytes) -> int | None:
@@ -205,6 +212,7 @@ class Database:
             for h, external in orphans:
                 if external:
                     self.blobs.delete(bytes(h).hex())
+            self._scrub()
             return deleted
 
     @staticmethod
@@ -249,6 +257,7 @@ class Database:
             for h, external in orphans:
                 if external:
                     self.blobs.delete(bytes(h).hex())
+            self._scrub()
             return deleted
 
     def delete_scope(self, category: str | None, include_pinned: bool) -> int:

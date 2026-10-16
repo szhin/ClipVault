@@ -15,6 +15,9 @@ dependencies = [
 dev = [
     "pytest>=8",
 ]
+build = [
+    "pyinstaller>=6",  # chỉ để đóng gói (packaging/build.ps1), không phải dependency chạy app
+]
 
 [project.scripts]
 clipvault = "clipvault.__main__:main"

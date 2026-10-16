@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Signal
@@ -10,13 +11,19 @@ from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from clipvault.ui import theme
 
-_ICON_PATH = Path(__file__).resolve().parents[3] / "assets" / "icon.png"
+
+def _icon_path() -> Path:
+    """assets/icon.png: cạnh mã nguồn khi chạy từ source, trong thư mục dữ liệu của PyInstaller khi đã đóng gói."""
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        return Path(bundle) / "assets" / "icon.png"
+    return Path(__file__).resolve().parents[3] / "assets" / "icon.png"
 
 
 def load_app_icon() -> QIcon:
     """assets/icon.png nếu có (chạy từ mã nguồn); không thì dùng biểu tượng vẽ sẵn của theme."""
-    if _ICON_PATH.is_file():
-        icon = QIcon(str(_ICON_PATH))
+    if _icon_path().is_file():
+        icon = QIcon(str(_icon_path()))
         if not icon.isNull():
             return icon
     return theme.app_icon()

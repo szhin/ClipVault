@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import uuid
 from collections.abc import Iterable
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+_HASH_RE = re.compile(r"[0-9a-f]{64}")
 
 
 class BlobStore:
@@ -17,6 +19,9 @@ class BlobStore:
         self.tmp = self.root / "tmp"
 
     def path_for(self, hex_hash: str) -> Path:
+        # Chỉ nhận đúng SHA-256 dạng hex thường: chặn "../", đường dẫn tuyệt đối, tên lạ.
+        if not _HASH_RE.fullmatch(hex_hash):
+            raise ValueError("invalid blob name")
         return self.root / hex_hash[:2] / hex_hash
 
     def exists(self, hex_hash: str) -> bool:

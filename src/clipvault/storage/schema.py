@@ -10,6 +10,7 @@ PRAGMAS = (
     "PRAGMA journal_mode=WAL",
     "PRAGMA foreign_keys=ON",
     "PRAGMA synchronous=NORMAL",
+    "PRAGMA secure_delete=ON",  # ghi đè nội dung đã xóa bằng 0 (clipboard có thể chứa mật khẩu)
 )
 
 DDL = """
