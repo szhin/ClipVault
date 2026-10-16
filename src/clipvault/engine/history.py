@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import functools
 import sqlite3
+import time
 
 from clipvault.classifier.rules import CATEGORIES, text_of
 from clipvault.core.model import Representation, StoredItem
 from clipvault.core.ports import ClipboardUnavailable, ClipboardWriteError
+from clipvault.core.limits import Limits
+from clipvault.engine import retention
 from clipvault.engine.paste import PasteService
-from clipvault.storage.db import Database, StorageError
+from clipvault.storage.db import Database, Stats, StorageError
 
 # (view trong sidebar) -> (danh mục, chỉ mục ghim)
 VIEWS: dict[str, tuple[str | None, bool]] = {
@@ -25,6 +28,9 @@ VIEWS: dict[str, tuple[str | None, bool]] = {
     "other": ("other", False),
     "pinned": (None, True),
 }
+
+# phạm vi xóa hàng loạt (Settings → Dữ liệu): danh mục hoặc "all"
+DELETE_SCOPES = ("text", "image", "link", "code", "other", "all")
 
 _IMAGE_CHOICES = ("image", "other")
 _TEXT_CHOICES = ("text", "link", "code", "other")
@@ -117,3 +123,54 @@ class HistoryService:
         if category not in CATEGORIES or category not in allowed_categories(item):
             raise HistoryError(f"change type: '{category}' is not allowed for this item")
         self.db.change_category(item_id, category)
+
+    # --- lưu trữ / xóa hàng loạt (Settings) ---------------------------------------------------
+
+    @_guard("storage info")
+    def storage_info(self) -> Stats:
+        return self.db.stats()
+
+    @staticmethod
+    def _scope_category(scope: str) -> str | None:
+        if scope not in DELETE_SCOPES:
+            raise HistoryError("delete: unknown scope")
+        return None if scope == "all" else scope
+
+    @_guard("delete preview")
+    def scope_summary(self, scope: str, include_pinned: bool) -> tuple[int, int]:
+        """(số mục, byte) sẽ bị xóa nếu xác nhận."""
+        return self.db.scope_summary(self._scope_category(scope), include_pinned)
+
+    @_guard("delete")
+    def delete_scope(self, scope: str, include_pinned: bool) -> int:
+        """Xóa theo phạm vi trong một transaction (kèm blob), rồi dọn file mồ côi. Trả số mục đã xóa."""
+        deleted = self.db.delete_scope(self._scope_category(scope), include_pinned)
+        self.db.sweep_orphans()
+        return deleted
+
+    @_guard("limits")
+    def would_trim(self, limits: Limits) -> bool:
+        stats = self.db.stats()
+        return stats.items > limits.max_items or stats.blob_bytes > limits.max_total_bytes
+
+    @_guard("limits")
+    def apply_limits(self, limits: Limits) -> int:
+        """Áp giới hạn mới bằng cơ chế dọn dẹp của engine (mục ghim được giữ). Trả số mục đã xóa."""
+        deleted = retention.enforce(self.db, limits).deleted
+        self.db.sweep_orphans()
+        return deleted
+
+    @_guard("auto delete")
+    def count_expired(self, days: int, now_ms: int | None = None) -> int:
+        if days <= 0:
+            return 0
+        now = now_ms if now_ms is not None else time.time_ns() // 1_000_000
+        return self.db.count_older_than(now - days * 86_400_000)
+
+    @_guard("auto delete")
+    def purge_expired(self, days: int, now_ms: int | None = None) -> int:
+        now = now_ms if now_ms is not None else time.time_ns() // 1_000_000
+        deleted = retention.purge_older_than(self.db, days, now)
+        if deleted:
+            self.db.sweep_orphans()
+        return deleted

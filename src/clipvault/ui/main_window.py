@@ -5,18 +5,22 @@ from __future__ import annotations
 from PySide6.QtCore import QModelIndex, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem, QMainWindow,
-    QMessageBox, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
+    QAbstractItemView, QBoxLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget,
+    QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter, QStackedWidget, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from clipvault.core.model import StoredItem
 from clipvault.engine.history import VIEWS, HistoryError, HistoryService
+from clipvault.engine.settings import SettingsStore
 from clipvault.ui import theme
 from clipvault.ui.delegate import COUNT_ROLE, ROW_HEIGHT, ItemDelegate, SidebarDelegate
 from clipvault.ui.format import CATEGORY_LABELS
 from clipvault.ui.images import ImageProvider
 from clipvault.ui.models import ITEM_ROLE, HistoryModel
+from clipvault.ui.prefs import Preferences
 from clipvault.ui.preview import PreviewPanel
+from clipvault.ui.settings_dialog import SettingsDialog
 
 SEARCH_DEBOUNCE_MS = 150
 COUNTS_DEBOUNCE_MS = 250
@@ -59,11 +63,16 @@ class SearchEdit(QLineEdit):
 
 
 class MainWindow(QMainWindow):
+    quit_requested = Signal()  # nút đóng khi cài đặt là "thoát hẳn"
+    data_changed = Signal()  # Settings đã xóa dữ liệu
+
     def __init__(
-        self, history: HistoryService, model: HistoryModel, images: ImageProvider, parent=None
+        self, history: HistoryService, model: HistoryModel, images: ImageProvider, parent=None,
+        prefs: Preferences | None = None,
     ) -> None:
         super().__init__(parent)
         self.history = history
+        self.prefs = prefs or Preferences(SettingsStore(history.db))
         self.model = model
         self.images = images
         self.hide_on_close = False  # bật khi có system tray: nút đóng chỉ ẩn cửa sổ
@@ -77,7 +86,6 @@ class MainWindow(QMainWindow):
         self.sidebar = QListWidget()
         self.sidebar.setObjectName("sidebar")
         self.sidebar.setAccessibleName("Categories")
-        self.sidebar.setFixedWidth(SIDEBAR_WIDTH)
         self.sidebar.setMouseTracking(True)
         self.sidebar.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.sidebar_delegate = SidebarDelegate(self.sidebar)
@@ -87,6 +95,39 @@ class MainWindow(QMainWindow):
             entry.setData(Qt.ItemDataRole.UserRole, view)
             entry.setToolTip(f"{CATEGORY_LABELS[view]}  (Ctrl+{n})")
             self.sidebar.addItem(entry)
+
+        # --- chân sidebar: switch sáng/tối (góc dưới trái) + nút Settings
+        self.theme_button = QToolButton()
+        self.theme_button.setObjectName("themeSwitch")
+        self.theme_button.setAccessibleName("Theme switch")
+        self.settings_button = QToolButton()
+        self.settings_button.setObjectName("settingsButton")
+        self.settings_button.setAccessibleName("Settings")
+        self.settings_button.setToolTip("Cài đặt")
+        self.sidebar_footer = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.sidebar_footer.setContentsMargins(theme.sp(1), theme.sp(1), theme.sp(1), theme.sp(1))
+        self.sidebar_footer.addWidget(self.theme_button)
+        self.sidebar_footer.addWidget(self.settings_button)
+        self.sidebar_footer.addStretch(1)
+        self.sidebar_panel = QWidget()
+        self.sidebar_panel.setObjectName("sidebarPanel")
+        panel_layout = QVBoxLayout(self.sidebar_panel)
+        panel_layout.setContentsMargins(theme.sp(0), theme.sp(0), theme.sp(0), theme.sp(0))
+        panel_layout.setSpacing(theme.sp(0))
+        panel_layout.addWidget(self.sidebar, 1)
+        panel_layout.addLayout(self.sidebar_footer)
+
+        # --- banner tạm dừng
+        self.pause_banner = QFrame()
+        self.pause_banner.setObjectName("pauseBanner")
+        banner_layout = QHBoxLayout(self.pause_banner)
+        banner_layout.setContentsMargins(theme.sp(1.5), theme.sp(1), theme.sp(1.5), theme.sp(1))
+        banner_text = QLabel("Đang tạm dừng ghi clipboard — nội dung mới sẽ không được lưu.")
+        banner_text.setWordWrap(True)
+        self.resume_button = QPushButton("Tiếp tục ghi")
+        banner_layout.addWidget(banner_text, 1)
+        banner_layout.addWidget(self.resume_button)
+        self.pause_banner.hide()
 
         # --- tìm kiếm + danh sách
         self.search = SearchEdit()
@@ -124,6 +165,7 @@ class MainWindow(QMainWindow):
         middle_layout = QVBoxLayout(middle)
         middle_layout.setContentsMargins(theme.sp(1), theme.sp(1.5), theme.sp(1), 0)
         middle_layout.setSpacing(theme.sp(1))
+        middle_layout.addWidget(self.pause_banner)
         middle_layout.addWidget(self.search)
         middle_layout.addWidget(self.list_stack, 1)
 
@@ -131,7 +173,7 @@ class MainWindow(QMainWindow):
         self.preview.setMinimumWidth(theme.sp(35))
 
         self.splitter = QSplitter()
-        self.splitter.addWidget(self.sidebar)
+        self.splitter.addWidget(self.sidebar_panel)
         self.splitter.addWidget(middle)
         self.splitter.addWidget(self.preview)
         self.splitter.setStretchFactor(0, 0)
@@ -140,12 +182,19 @@ class MainWindow(QMainWindow):
         self.splitter.setSizes([SIDEBAR_WIDTH, 400, 464])
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(1)
-        self.setCentralWidget(self.splitter)
+        self.root = theme.GradientBackground()  # widget gốc duy nhất có gradient
+        root_layout = QVBoxLayout(self.root)
+        root_layout.setContentsMargins(theme.sp(0), theme.sp(0), theme.sp(0), theme.sp(0))
+        root_layout.addWidget(self.splitter)
+        self.setCentralWidget(self.root)
 
         self.statusBar().setSizeGripEnabled(False)
         self.hint_label = QLabel(HINT)  # phím tắt luôn hiển thị
         self.hint_label.setObjectName("meta")
         self.statusBar().addPermanentWidget(self.hint_label)
+        self.pause_status = QLabel("⏸ Đang tạm dừng ghi")
+        self.pause_status.setObjectName("pauseStatus")
+        self.statusBar().addPermanentWidget(self.pause_status)
 
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -161,6 +210,8 @@ class MainWindow(QMainWindow):
         self._after_reload()
         self.update_counts()
         self.preview.refresh_theme()
+        self._apply_theme_controls()
+        self._apply_pause_state()
         self._apply_compact()
         self.setTabOrder(self.sidebar, self.search)
         self.setTabOrder(self.search, self.list)
@@ -177,6 +228,10 @@ class MainWindow(QMainWindow):
         self.list.doubleClicked.connect(lambda _i: self.copy_current(hide=True))
         self._counts_timer.timeout.connect(self.update_counts)
         theme.bus.changed.connect(self._on_theme_changed)
+        self.theme_button.clicked.connect(self.toggle_theme)
+        self.settings_button.clicked.connect(self.open_settings)
+        self.resume_button.clicked.connect(lambda: self.prefs.set(paused=False))
+        self.prefs.changed.connect(self._on_prefs_changed)
         self.model.error.connect(self._show_status)
         for signal in (self.model.modelReset, self.model.rowsInserted, self.model.rowsRemoved):
             signal.connect(self._update_empty_state)
@@ -270,8 +325,44 @@ class MainWindow(QMainWindow):
             entry.setData(COUNT_ROLE, counts.get(entry.data(Qt.ItemDataRole.UserRole)))
         self.sidebar.viewport().update()
 
+    def _apply_theme_controls(self) -> None:
+        dark = theme.current().name == "dark"
+        self.theme_button.setIcon(theme.icon("sun" if dark else "moon", size=theme.sp(2.5)))
+        self.theme_button.setToolTip("Chuyển sang giao diện sáng" if dark else "Chuyển sang giao diện tối")
+        self.settings_button.setIcon(theme.icon("gear", size=theme.sp(2.5)))
+
+    def _apply_pause_state(self) -> None:
+        paused = self.prefs.values.paused
+        self.pause_banner.setVisible(paused)
+        self.pause_status.setVisible(paused)
+
+    def _on_prefs_changed(self, _diff) -> None:
+        self._apply_pause_state()
+
+    def toggle_theme(self) -> None:
+        """Đảo sáng/tối ngay (thành chế độ cố định; chọn lại "Hệ thống" trong Settings)."""
+        self.prefs.set(theme="light" if theme.current().name == "dark" else "dark")
+
+    def open_settings(self) -> SettingsDialog:
+        dialog = SettingsDialog(self.history, self.prefs, self)
+        dialog.data_changed.connect(self.after_data_deleted)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.show()
+        self._settings_dialog = dialog
+        return dialog
+
+    def after_data_deleted(self) -> None:
+        """Settings vừa xóa/dọn dữ liệu: nạp lại danh sách và số đếm ở sidebar."""
+        self.images.clear()
+        self._refresh()
+        self.update_counts()
+        self.data_changed.emit()
+
     def _on_theme_changed(self) -> None:
         self.setStyleSheet(theme.stylesheet())
+        self._apply_theme_controls()
+        self.list.verticalScrollBar().setSingleStep(theme.row_height() // 2)
+        self.list.doItemsLayout()
         self.search.update()
         self.preview.refresh_theme()
         self._update_empty_state()
@@ -281,7 +372,9 @@ class MainWindow(QMainWindow):
     def _apply_compact(self) -> None:
         compact = self.width() < COMPACT_BELOW
         self.sidebar_delegate.compact = compact
-        self.sidebar.setFixedWidth(SIDEBAR_COMPACT_WIDTH if compact else SIDEBAR_WIDTH)
+        self.sidebar_panel.setFixedWidth(SIDEBAR_COMPACT_WIDTH if compact else SIDEBAR_WIDTH)
+        self.sidebar_footer.setDirection(
+            QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight)
         self.hint_label.setVisible(self.width() >= COMPACT_BELOW)
         self.sidebar.viewport().update()
 
@@ -392,6 +485,8 @@ class MainWindow(QMainWindow):
             return
         if item.pinned and not self.confirm("This item is pinned. Delete it anyway?"):
             return
+        if not item.pinned and self.prefs.values.confirm_delete and not self.confirm("Delete this item?"):
+            return
         row = self._current_row()
         try:
             self.history.delete(item.id)
@@ -436,6 +531,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self.hide_on_close and not self._quitting:
             event.ignore()
-            self.hide()
+            if self.prefs.values.close_to_tray:
+                self.hide()
+            else:
+                self.quit_requested.emit()
         else:
             event.accept()

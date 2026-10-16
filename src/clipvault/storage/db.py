@@ -207,6 +207,69 @@ class Database:
                     self.blobs.delete(bytes(h).hex())
             return deleted
 
+    @staticmethod
+    def _scope_where(category: str | None, include_pinned: bool) -> tuple[str, list]:
+        where: list[str] = []
+        params: list = []
+        if category:
+            where.append("EXISTS (SELECT 1 FROM tags t WHERE t.item_id = items.id AND t.tag = ?)")
+            params.append("cat:" + category)
+        if not include_pinned:
+            where.append("pinned = 0")
+        return (" WHERE " + " AND ".join(where)) if where else "", params
+
+    def scope_summary(self, category: str | None, include_pinned: bool) -> tuple[int, int]:
+        """(số mục, tổng byte payload) của phạm vi xóa; category None = mọi loại."""
+        where, params = self._scope_where(category, include_pinned)
+        with self._lock:
+            count, size = self._conn.execute(
+                f"SELECT COUNT(*), COALESCE(SUM(total_size), 0) FROM items{where}", params
+            ).fetchone()
+        return count, size
+
+    def _delete_where(self, where: str, params: Sequence) -> int:
+        """Xóa mục theo điều kiện trong MỘT transaction cùng blob mồ côi; file ngoài xóa sau khi commit."""
+        with self._lock:
+            try:
+                c = self._conn
+                c.execute("BEGIN IMMEDIATE")
+                try:
+                    deleted = c.execute(f"DELETE FROM items{where}", tuple(params)).rowcount
+                    orphans = c.execute(
+                        "SELECT hash, external FROM blobs WHERE hash NOT IN"
+                        " (SELECT blob_hash FROM representations)"
+                    ).fetchall()
+                    c.execute("DELETE FROM blobs WHERE hash NOT IN (SELECT blob_hash FROM representations)")
+                    c.execute("COMMIT")
+                except BaseException:
+                    c.execute("ROLLBACK")
+                    raise
+            except sqlite3.Error as exc:
+                raise StorageError(f"delete failed: {type(exc).__name__}") from None
+            for h, external in orphans:
+                if external:
+                    self.blobs.delete(bytes(h).hex())
+            return deleted
+
+    def delete_scope(self, category: str | None, include_pinned: bool) -> int:
+        where, params = self._scope_where(category, include_pinned)
+        return self._delete_where(where, params)
+
+    def count_older_than(self, cutoff_ms: int) -> int:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM items WHERE pinned = 0 AND last_seen_at < ?", (cutoff_ms,)
+            ).fetchone()[0]
+
+    def delete_older_than(self, cutoff_ms: int) -> int:
+        """Xóa mục chưa ghim có last_seen_at < cutoff. Mục ghim không bao giờ bị động đến."""
+        return self._delete_where(" WHERE pinned = 0 AND last_seen_at < ?", (cutoff_ms,))
+
+    def sweep_orphans(self) -> int:
+        """Dọn file blob mồ côi. Giữ lock để không xóa nhầm file capture đang ghi dở."""
+        with self._lock:
+            return self.blobs.sweep(self.external_hashes())
+
     # --- đọc ---------------------------------------------------------------------------------
 
     _ITEM_COLS = (

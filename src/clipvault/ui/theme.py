@@ -11,7 +11,10 @@ from dataclasses import dataclass
 from string import Template
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QIcon, QPainter, QPalette, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import (
+    QColor, QFont, QGuiApplication, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap, QPolygonF,
+)
+from PySide6.QtWidgets import QToolTip, QWidget
 
 # --- khoảng cách (lưới 8 px), bo góc, cỡ chữ -----------------------------------------------------
 
@@ -29,7 +32,13 @@ RADIUS_LG = 12
 
 FONT_UI = ('"Segoe UI Variable Text"', '"Segoe UI"', "sans-serif")
 FONT_MONO = ('"Cascadia Mono"', "Consolas", '"Courier New"', "monospace")
-SIZE_SMALL, SIZE_BASE, SIZE_TITLE = 9, 10, 13  # pt
+SIZE_SMALL, SIZE_BASE, SIZE_TITLE = 9, 10, 13  # pt (theo FONT_SCALES; đổi bằng apply())
+FONT_SCALES = {"small": (8, 9, 12), "medium": (9, 10, 13), "large": (11, 12, 15)}  # (nhỏ, thường, tiêu đề)
+# Chiều cao một dòng danh sách (px) theo mật độ và cỡ chữ.
+ROW_HEIGHTS = {
+    "comfortable": {"small": 60, "medium": 64, "large": 72},
+    "compact": {"small": 48, "medium": 52, "large": 60},
+}
 
 CATEGORIES = ("image", "text", "link", "code", "other")
 SIDEBAR_ICONS = {"all": "all", "image": "image", "text": "text", "link": "link", "code": "code",
@@ -42,6 +51,7 @@ class Palette:
     bg: str
     sidebar: str
     surface: str
+    elevated: str
     hover: str
     selected: str
     border: str
@@ -52,6 +62,9 @@ class Palette:
     accent_hover: str
     on_accent: str
     danger: str
+    warn: str
+    grad_start: str
+    grad_end: str
     cat_image: str
     cat_text: str
     cat_link: str
@@ -63,15 +76,17 @@ class Palette:
 
 
 DARK = Palette(
-    name="dark", bg="#14161a", sidebar="#101216", surface="#1c1f26", hover="#242834", selected="#27334f",
-    border="#2d323d", text="#e8eaf0", muted="#9aa3b2", faint="#6b7384", accent="#6ea8fe",
-    accent_hover="#8dbbff", on_accent="#0b1220", danger="#ff7b7b",
+    name="dark", bg="#12141a", sidebar="#161922", surface="#1c2029", elevated="#232836", hover="#232836",
+    selected="#222c44", border="#2b3140", text="#e6e9f0", muted="#8b93a7", faint="#6b7384", accent="#5b8cff",
+    accent_hover="#7ba2ff", on_accent="#0b1220", danger="#ff7b7b", warn="#f0b35a",
+    grad_start="#12141a", grad_end="#1a1f33",
     cat_image="#b794f6", cat_text="#9fb3c8", cat_link="#5eb0ff", cat_code="#5fd38d", cat_other="#f0b35a",
 )
 LIGHT = Palette(
-    name="light", bg="#f4f5f8", sidebar="#eceef3", surface="#ffffff", hover="#eef1f7", selected="#e1eafe",
-    border="#d9dde5", text="#14161a", muted="#566070", faint="#8a93a3", accent="#2563eb",
-    accent_hover="#1d4fd0", on_accent="#ffffff", danger="#c62828",
+    name="light", bg="#f4f5f8", sidebar="#eceef3", surface="#fbfcfe", elevated="#fdfdfe", hover="#eef1f7",
+    selected="#e3ebfc", border="#dde1ea", text="#1b1f2a", muted="#5b6578", faint="#8a93a3", accent="#3566e4",
+    accent_hover="#2b57cc", on_accent="#ffffff", danger="#c62828", warn="#b45309",
+    grad_start="#f4f5f8", grad_end="#e9eefb",
     cat_image="#7c3aed", cat_text="#475569", cat_link="#2563eb", cat_code="#15803d", cat_other="#b45309",
 )
 _SCHEMES = {"dark": DARK, "light": LIGHT}
@@ -99,10 +114,29 @@ class _Bus(QObject):
 
 bus = _Bus()
 _current: Palette = DARK
+_mode = "system"  # system | light | dark
+_font_size = "medium"
+_density = "comfortable"
 
 
 def current() -> Palette:
     return _current
+
+
+def mode() -> str:
+    return _mode
+
+
+def font_size() -> str:
+    return _font_size
+
+
+def density() -> str:
+    return _density
+
+
+def row_height() -> int:
+    return ROW_HEIGHTS[_density][_font_size]
 
 
 def system_scheme() -> str:
@@ -117,7 +151,41 @@ def system_scheme() -> str:
     return "light" if scheme == Qt.ColorScheme.Light else "dark"
 
 
+def resolved_scheme() -> str:
+    return system_scheme() if _mode == "system" else _mode
+
+
+def _sync_title_bar() -> bool:
+    """Đặt color scheme của Qt (title bar Windows đổi theo). False nếu phiên bản Qt không hỗ trợ."""
+    app = QGuiApplication.instance()
+    if app is None:
+        return False
+    hints = app.styleHints()
+    if not (hasattr(hints, "setColorScheme") and hasattr(hints, "unsetColorScheme")):
+        return False
+    if _mode == "system":
+        hints.unsetColorScheme()
+    else:
+        hints.setColorScheme(Qt.ColorScheme.Light if _mode == "light" else Qt.ColorScheme.Dark)
+    return True
+
+
+def _install_look(changed_extra: bool = False) -> None:
+    """Áp palette + QSS toàn app theo trạng thái hiện tại; phát bus.changed khi có gì đổi."""
+    global _current
+    palette = _SCHEMES[resolved_scheme()]
+    changed = changed_extra or palette is not _current
+    _current = palette
+    app = QGuiApplication.instance()
+    if app is not None and hasattr(app, "setPalette"):
+        app.setPalette(qpalette(palette))
+        QToolTip.setPalette(qpalette(palette))
+    if changed:
+        bus.changed.emit()
+
+
 def set_scheme(name: str) -> None:
+    """Đặt thẳng palette (không đổi mode). Dùng cho test và khi theo hệ thống."""
     global _current
     palette = _SCHEMES.get(name)
     if palette is None or palette is _current:
@@ -126,18 +194,59 @@ def set_scheme(name: str) -> None:
     app = QGuiApplication.instance()
     if app is not None and hasattr(app, "setPalette"):
         app.setPalette(qpalette(palette))
+        QToolTip.setPalette(qpalette(palette))
     bus.changed.emit()
 
 
+def apply(theme_mode: str | None = None, font: str | None = None, dens: str | None = None) -> None:
+    """Đổi chế độ sáng/tối/hệ thống, cỡ chữ, mật độ. Áp ngay, phát bus.changed một lần."""
+    global _mode, _font_size, _density, SIZE_SMALL, SIZE_BASE, SIZE_TITLE
+    extra = False
+    if theme_mode is not None and theme_mode in ("system", "light", "dark") and theme_mode != _mode:
+        _mode = theme_mode
+        _sync_title_bar()
+        extra = True
+    if font in FONT_SCALES and font != _font_size:
+        _font_size = font
+        SIZE_SMALL, SIZE_BASE, SIZE_TITLE = FONT_SCALES[font]
+        extra = True
+    if dens in ROW_HEIGHTS and dens != _density:
+        _density = dens
+        extra = True
+    _install_look(extra)
+
+
 def install(app) -> None:
-    """Gọi một lần lúc khởi động: style Fusion (QSS nhất quán), palette theo scheme, theo dõi đổi scheme."""
+    """Gọi một lần lúc khởi động: style Fusion (QSS nhất quán), palette theo mode, theo dõi đổi scheme hệ thống."""
     app.setStyle("Fusion")
-    set_scheme(system_scheme())
-    app.setPalette(qpalette(current()))
+    _sync_title_bar()
+    _install_look(True)
     try:
-        app.styleHints().colorSchemeChanged.connect(lambda _s: set_scheme(system_scheme()))
+        # Chỉ theo hệ thống khi mode == "system"; mode cố định thì bỏ qua tín hiệu.
+        app.styleHints().colorSchemeChanged.connect(lambda _s: _mode == "system" and _install_look())
     except AttributeError:
         pass
+
+
+class GradientBackground(QWidget):
+    """Widget gốc DUY NHẤT có gradient: chéo từ trên-trái xuống dưới-phải, vẽ bằng QLinearGradient.
+
+    Mọi widget con để nền trong suốt hoặc màu phẳng của token, nên gradient liền một mảng khi resize.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("gradientRoot")
+        bus.changed.connect(self.update)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = current()
+        grad = QLinearGradient(0, 0, self.width(), self.height())
+        grad.setColorAt(0.0, QColor(p.grad_start))
+        grad.setColorAt(1.0, QColor(p.grad_end))
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), grad)
+        painter.end()
 
 
 def qpalette(p: Palette) -> QPalette:
@@ -147,7 +256,7 @@ def qpalette(p: Palette) -> QPalette:
         QPalette.ColorRole.Base: p.surface, QPalette.ColorRole.AlternateBase: p.hover,
         QPalette.ColorRole.Text: p.text, QPalette.ColorRole.Button: p.surface,
         QPalette.ColorRole.ButtonText: p.text, QPalette.ColorRole.Highlight: p.accent,
-        QPalette.ColorRole.HighlightedText: p.on_accent, QPalette.ColorRole.ToolTipBase: p.surface,
+        QPalette.ColorRole.HighlightedText: p.on_accent, QPalette.ColorRole.ToolTipBase: p.elevated,
         QPalette.ColorRole.ToolTipText: p.text, QPalette.ColorRole.PlaceholderText: p.muted,
         QPalette.ColorRole.Link: p.accent,
     }
@@ -161,7 +270,8 @@ def qpalette(p: Palette) -> QPalette:
 # --- font -----------------------------------------------------------------------------------------
 
 
-def ui_font(size: float = SIZE_BASE, bold: bool = False) -> QFont:
+def ui_font(size: float | None = None, bold: bool = False) -> QFont:
+    size = SIZE_BASE if size is None else size
     font = QFont()
     font.setFamilies([f.strip('"') for f in FONT_UI[:-1]])
     font.setPointSizeF(size)
@@ -169,7 +279,8 @@ def ui_font(size: float = SIZE_BASE, bold: bool = False) -> QFont:
     return font
 
 
-def mono_font(size: float = SIZE_BASE) -> QFont:
+def mono_font(size: float | None = None) -> QFont:
+    size = SIZE_BASE if size is None else size
     font = QFont()
     font.setFamilies([f.strip('"') for f in FONT_MONO[:-1]])
     font.setStyleHint(QFont.StyleHint.Monospace)
@@ -182,8 +293,9 @@ def mono_font(size: float = SIZE_BASE) -> QFont:
 _QSS = Template("""
 * { font-family: $font_ui; font-size: ${size_base}pt; }
 QWidget { color: $text; }
-QMainWindow, QDialog, QSplitter, QWidget#content, QWidget#previewPanel { background: $bg; }
-QMessageBox { background: $bg; }
+QMainWindow, QDialog, QMessageBox { background: $bg; }
+QSplitter, QWidget#content, QWidget#previewPanel { background: transparent; }
+QWidget#sidebarPanel { background: $sidebar; }
 QSplitter::handle { background: $border; }
 QSplitter::handle:horizontal { width: 1px; }
 
@@ -191,7 +303,7 @@ QStatusBar { background: $bg; color: $muted; border-top: 1px solid $border; }
 QStatusBar::item { border: none; }
 QStatusBar QLabel { color: $muted; font-size: ${size_small}pt; padding: 0 ${sp1}px; }
 
-QListWidget#sidebar { background: $sidebar; border: none; outline: none; }
+QListWidget#sidebar { background: transparent; border: none; outline: none; }
 QListView#history { background: transparent; border: none; outline: none; }
 QListView#history:focus { border: none; }
 
@@ -229,13 +341,34 @@ QPushButton[variant="primary"]:disabled, QToolButton[variant="primary"]:disabled
 QPushButton[variant="danger"]:hover, QToolButton[variant="danger"]:hover { color: $danger; border-color: $danger; }
 QToolButton::menu-indicator { subcontrol-position: right center; subcontrol-origin: padding; right: ${sp1}px; }
 
-QMenu { background: $surface; color: $text; border: 1px solid $border; border-radius: ${r_md}px; padding: ${sp0_5}px; }
+QMenu { background: $elevated; color: $text; border: 1px solid $border; border-radius: ${r_md}px; padding: ${sp0_5}px; }
 QMenu::item { padding: ${sp1}px ${sp3}px ${sp1}px ${sp2}px; border-radius: ${r_sm}px; }
 QMenu::item:selected { background: $selected; }
 QMenu::indicator { width: ${sp2}px; height: ${sp2}px; }
 QMenu::separator { height: 1px; background: $border; margin: ${sp0_5}px ${sp1}px; }
 
-QToolTip { background: $surface; color: $text; border: 1px solid $border; padding: ${sp0_5}px ${sp1}px; }
+QToolTip { background: $elevated; color: $text; border: 1px solid $border; padding: ${sp0_5}px ${sp1}px; }
+
+QDialog QScrollArea, QScrollArea#settingsScroll { background: transparent; border: none; }
+QWidget#settingsBody { background: $bg; }
+QGroupBox { background: $surface; border: 1px solid $border; border-radius: ${r_lg}px; margin-top: ${sp2}px; padding: ${sp2}px ${sp2}px ${sp1_5}px ${sp2}px; font-weight: 600; }
+QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: ${sp2}px; padding: 0 ${sp0_5}px; color: $text; background: transparent; }
+QGroupBox QLabel { background: transparent; font-weight: 400; }
+QLabel#error { color: $danger; background: transparent; }
+QLabel#hint { color: $muted; font-size: ${size_small}pt; background: transparent; }
+QCheckBox, QRadioButton { background: transparent; spacing: ${sp1}px; font-weight: 400; }
+QLineEdit { background: $elevated; color: $text; border: 1px solid $border; border-radius: ${r_md}px; padding: ${sp0_5}px ${sp1}px; min-height: ${sp3}px; selection-background-color: $accent; selection-color: $on_accent; }
+QLineEdit:focus { border: 1px solid $accent; }
+QLineEdit[invalid="true"] { border: 1px solid $danger; }
+QComboBox { background: $elevated; color: $text; border: 1px solid $border; border-radius: ${r_md}px; padding: ${sp0_5}px ${sp1}px; min-height: ${sp3}px; }
+QComboBox:hover { border-color: $faint; }
+QComboBox:focus { border: 1px solid $accent; }
+QComboBox QAbstractItemView { background: $elevated; color: $text; border: 1px solid $border; outline: 0; selection-background-color: $selected; selection-color: $text; padding: ${sp0_5}px; }
+QToolButton#themeSwitch, QToolButton#settingsButton { background: transparent; border: 1px solid transparent; border-radius: ${r_md}px; padding: ${sp1}px; }
+QToolButton#themeSwitch:hover, QToolButton#settingsButton:hover { background: $hover; border-color: $border; }
+QFrame#pauseBanner { background: $elevated; border: 1px solid $warn; border-radius: ${r_md}px; }
+QFrame#pauseBanner QLabel { background: transparent; color: $text; }
+QLabel#pauseStatus { color: $warn; font-size: ${size_small}pt; font-weight: 600; padding: 0 ${sp1}px; }
 
 QScrollBar:vertical { background: transparent; width: ${sp1}px; margin: 0; }
 QScrollBar::handle:vertical { background: $border; border-radius: ${r_sm}px; min-height: ${sp4}px; }
@@ -335,9 +468,43 @@ def _i_search(p, c, filled):
     p.drawLine(QPointF(15, 15), QPointF(20.5, 20.5))
 
 
+def _i_sun(p, c, filled):
+    p.drawEllipse(QPointF(12, 12), 4.2, 4.2)
+    for k in range(8):
+        p.save()
+        p.translate(12, 12)
+        p.rotate(k * 45)
+        p.drawLine(QPointF(0, -7.5), QPointF(0, -10))
+        p.restore()
+
+
+def _i_moon(p, c, filled):
+    disc = QPainterPath()
+    disc.addEllipse(QPointF(12, 12), 8, 8)
+    bite = QPainterPath()
+    bite.addEllipse(QPointF(16.5, 8.5), 7, 7)
+    p.drawPath(disc.subtracted(bite))
+
+
+def _i_gear(p, c, filled):
+    p.drawEllipse(QPointF(12, 12), 3, 3)
+    for k in range(8):
+        p.save()
+        p.translate(12, 12)
+        p.rotate(k * 45)
+        p.drawLine(QPointF(0, -6.5), QPointF(0, -9.5))
+        p.restore()
+    p.drawEllipse(QPointF(12, 12), 6.5, 6.5)
+
+
+def _i_pause(p, c, filled):
+    p.drawLine(QPointF(9, 5.5), QPointF(9, 18.5))
+    p.drawLine(QPointF(15, 5.5), QPointF(15, 18.5))
+
+
 _ICONS = {
     "all": _i_all, "image": _i_image, "text": _i_text, "link": _i_link, "code": _i_code, "other": _i_other,
-    "pinned": _i_pinned, "copy": _i_copy, "delete": _i_delete, "tag": _i_tag, "search": _i_search,
+    "pinned": _i_pinned, "sun": _i_sun, "moon": _i_moon, "gear": _i_gear, "pause": _i_pause, "copy": _i_copy, "delete": _i_delete, "tag": _i_tag, "search": _i_search,
 }
 ICON_NAMES = tuple(_ICONS)
 

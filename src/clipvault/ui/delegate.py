@@ -53,7 +53,7 @@ class ItemDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index) -> QSize:  # noqa: N802
         # Chiều rộng do view quyết định (ListMode giãn theo viewport); chỉ cố định chiều cao.
-        return QSize(0, ROW_HEIGHT)
+        return QSize(0, theme.row_height())
 
     def paint(self, painter: QPainter, option, index) -> None:
         item: StoredItem | None = index.data(ITEM_ROLE)
@@ -72,8 +72,10 @@ class ItemDelegate(QStyledItemDelegate):
         painter.setPen(QPen(QColor(border), 1))
         painter.drawRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), theme.RADIUS_MD, theme.RADIUS_MD)
 
-        inner = card.toRect().adjusted(theme.sp(1.5), theme.sp(1), -theme.sp(1.5), -theme.sp(1))
-        lead = QRect(inner.left(), inner.top() + (inner.height() - THUMB) // 2, THUMB, THUMB)
+        pad_v = theme.sp(1) if theme.density() == "comfortable" else theme.sp(0.5)
+        inner = card.toRect().adjusted(theme.sp(1.5), pad_v, -theme.sp(1.5), -pad_v)
+        thumb = min(THUMB, inner.height())
+        lead = QRect(inner.left(), inner.top() + (inner.height() - thumb) // 2, thumb, thumb)
         self._paint_lead(painter, lead, item)
 
         right = inner.right()
@@ -125,7 +127,7 @@ class ItemDelegate(QStyledItemDelegate):
         icon_name = item.category if item.category in theme.CATEGORIES else "other"
         if item.kind == "image":
             icon_name = "image"
-        side = int(THUMB * 0.55)
+        side = int(rect.width() * 0.55)
         target = QRect(0, 0, side, side)
         target.moveCenter(rect.center())
         theme.draw_icon(painter, icon_name, target, color)

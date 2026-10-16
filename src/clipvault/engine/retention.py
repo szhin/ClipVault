@@ -40,3 +40,10 @@ def enforce(db: Database, limits: Limits, protect_id: int | None = None) -> Rete
         deleted += db.delete_items([item_id])
         stats = db.stats()
     return RetentionResult(deleted=deleted, pinned_over_limit=_over(stats, limits))
+
+
+def purge_older_than(db: Database, days: int, now_ms: int) -> int:
+    """Tự xóa mục chưa ghim không xem lại quá `days` ngày (0 = tắt). Trả số mục đã xóa."""
+    if days <= 0:
+        return 0
+    return db.delete_older_than(now_ms - days * 86_400_000)

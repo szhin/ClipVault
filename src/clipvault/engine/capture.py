@@ -126,6 +126,7 @@ class CaptureController:
         self.service = CaptureService(self.db, self.limits, clock)
         self.on_result = on_result
         self._last_sequence: int | None = None
+        self._paused = False
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="clipvault-writer")
         self._closed = threading.Event()
         removed = self.db.blobs.sweep(self.db.external_hashes())
@@ -141,8 +142,16 @@ class CaptureController:
         if sequence is not None:
             self._last_sequence = sequence
 
+    def set_paused(self, paused: bool) -> None:
+        """Tạm dừng/tiếp tục ghi clipboard. Khi tạm dừng không đọc và không lưu gì."""
+        self._paused = bool(paused)
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
     def _on_change(self) -> Future | None:
-        if self._closed.is_set():
+        if self._closed.is_set() or self._paused:
             return None
         seq = self.reader.sequence_number()
         if seq is not None and seq == self._last_sequence:

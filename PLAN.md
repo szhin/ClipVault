@@ -22,6 +22,9 @@ Chi tiết: docs/ARCHITECTURE.md.
 - UI chỉ gọi `engine.history.HistoryService`; lỗi trả về `HistoryError` (thông báo không chứa nội dung clipboard).
 - Phím tắt mở cửa sổ: mặc định `Ctrl+Shift+V` (đọc `settings.ui.hotkey`); trùng phím thì báo qua tray, vẫn mở được từ tray.
 - Một bản chạy duy nhất (`QLockFile` trong thư mục dữ liệu); đóng cửa sổ = chạy nền ở tray; `--background` khởi động không hiện cửa sổ.
+- Phase 3c: cài đặt lưu trong bảng `settings` (`engine/settings.py`; khóa `ui.theme|font_size|density`, `limits.max_items|max_total_bytes`,
+  `retention.days`, `behavior.close_to_tray|confirm_delete`, `privacy.paused`). Theme: gradient chỉ ở `theme.GradientBackground` (widget gốc),
+  mọi bề mặt khác phẳng/trong suốt. Engine chỉ thêm: `CaptureController.set_paused`, xóa theo phạm vi/tuổi (`Database.delete_scope|delete_older_than`).
 
 ## Tiến độ
 - [x] 0 Kiến trúc + khung dự án

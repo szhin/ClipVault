@@ -109,6 +109,10 @@ class ImageProvider(QObject):
         key = (item_id, max_side)
         return key in self._cache and self._cache[key] is None
 
+    def clear(self) -> None:
+        """Bỏ toàn bộ cache (sau khi xóa hàng loạt; id có thể được tái sử dụng)."""
+        self._cache.clear()
+
     def forget(self, item_id: int) -> None:
         for key in [k for k in self._cache if k[0] == item_id]:
             del self._cache[key]

@@ -58,6 +58,18 @@ def main() -> int:
     ui = ClipVaultUi(history, WindowsHotkey(), spec)
     controller.on_result = ui.bridge.notify
 
+    from clipvault.engine.settings import SettingsStore
+
+    def apply_engine_settings(changed) -> None:
+        s = ui.prefs.values
+        if "paused" in changed:
+            controller.set_paused(s.paused)
+        if {"max_items", "max_total_mb"} & set(changed):
+            controller.limits = controller.service.limits = SettingsStore.limits(s, controller.limits)
+
+    controller.set_paused(ui.prefs.values.paused)  # tạm dừng được nhớ qua lần mở lại
+    ui.prefs.changed.connect(apply_engine_settings)
+
     app.aboutToQuit.connect(ui.shutdown)  # dừng đọc DB từ UI trước khi đóng DB
     app.aboutToQuit.connect(controller.shutdown)
     controller.start()
