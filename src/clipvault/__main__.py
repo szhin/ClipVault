@@ -20,17 +20,32 @@ def _setup_logging(log_dir) -> None:
     root.addHandler(handler)
 
 
+def _platform_adapters():
+    """(reader, writer, notifier, hotkey) của nền tảng hiện tại; None nếu chưa hỗ trợ."""
+    if sys.platform == "win32":
+        from clipvault.adapters.qt_notifier import QtChangeNotifier
+        from clipvault.adapters.windows.clipboard import WindowsClipboardReader, WindowsClipboardWriter
+        from clipvault.adapters.windows.hotkey import WindowsHotkey
+
+        return WindowsClipboardReader(), WindowsClipboardWriter(), QtChangeNotifier(), WindowsHotkey()
+    if sys.platform == "darwin":
+        from clipvault.adapters.macos.clipboard import MacClipboardReader, MacClipboardWriter
+        from clipvault.adapters.macos.hotkey import MacHotkey
+        from clipvault.adapters.macos.notifier import PollingChangeNotifier
+
+        reader = MacClipboardReader()
+        return reader, MacClipboardWriter(), PollingChangeNotifier(reader), MacHotkey()
+    return None
+
+
 def main() -> int:
-    if sys.platform != "win32":
-        print(f"ClipVault {__version__}: nền tảng {sys.platform} chưa được hỗ trợ (macOS: Phase 6).")
+    if sys.platform not in ("win32", "darwin"):
+        print(f"ClipVault {__version__}: nền tảng {sys.platform} chưa được hỗ trợ.")
         return 1
 
     from PySide6.QtCore import QLockFile
     from PySide6.QtWidgets import QApplication
 
-    from clipvault.adapters.qt_notifier import QtChangeNotifier
-    from clipvault.adapters.windows.clipboard import WindowsClipboardReader, WindowsClipboardWriter
-    from clipvault.adapters.windows.hotkey import WindowsHotkey
     from clipvault.engine.capture import CaptureController
     from clipvault.engine.history import HistoryService
     from clipvault.engine.paste import PasteService
@@ -51,11 +66,12 @@ def main() -> int:
         print("ClipVault đang chạy (xem biểu tượng ở khay hệ thống).")
         return 0
 
-    controller = CaptureController(WindowsClipboardReader(), QtChangeNotifier(), data_dir)
-    paste = PasteService(controller.db, WindowsClipboardWriter(), on_written=controller.ignore_sequence)
+    reader, writer, notifier, hotkey = _platform_adapters()
+    controller = CaptureController(reader, notifier, data_dir)
+    paste = PasteService(controller.db, writer, on_written=controller.ignore_sequence)
     history = HistoryService(controller.db, paste)
     spec = controller.db.settings().get("ui.hotkey", DEFAULT_HOTKEY)
-    ui = ClipVaultUi(history, WindowsHotkey(), spec)
+    ui = ClipVaultUi(history, hotkey, spec)
     controller.on_result = ui.bridge.notify
 
     from clipvault.engine.settings import SettingsStore

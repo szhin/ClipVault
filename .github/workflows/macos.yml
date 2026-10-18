@@ -1,0 +1,28 @@
+name: macOS build
+
+# Build thủ công (Actions > macOS build > Run workflow) hoặc khi đẩy tag v*. Bản .dmg chưa ký/notarize, chỉ arm64.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cài môi trường
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e ".[dev,build]"
+      - name: Test
+        run: .venv/bin/python -m pytest -q
+      - name: Build .app và .dmg
+        run: bash packaging/build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipVault-macos
+          path: dist/*.dmg
