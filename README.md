@@ -11,7 +11,7 @@ Lưu lịch sử text và ảnh bạn đã copy, tìm lại nhanh, ghim mục qu
 ![PySide6](https://img.shields.io/badge/UI-PySide6-41CD52?logo=qt&logoColor=white)
 ![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-supported-0078D6?logo=windows&logoColor=white)
-![macOS](https://img.shields.io/badge/macOS-chưa kiểm chứng-lightgrey?logo=apple&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-ch%C6%B0a%20ki%E1%BB%83m%20ch%E1%BB%A9ng-lightgrey?logo=apple&logoColor=white)
 
 <img src="assets/all.png" alt="Giao diện chính của ClipVault" width="860" />
 
