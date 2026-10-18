@@ -310,6 +310,19 @@ def test_settings_button_opens_dialog(window, qapp):  # noqa: F811
     window._settings_dialog.close()
 
 
+def test_settings_button_does_not_open_duplicate_dialogs(window, qapp):  # noqa: F811
+    """Hồi quy: bấm Settings nhiều lần từng mở nhiều cửa sổ chồng nhau."""
+    from PySide6.QtWidgets import QDialog
+
+    window.settings_button.click()
+    first = window._settings_dialog
+    window.settings_button.click()
+    window.settings_button.click()
+    assert window._settings_dialog is first
+    assert len(window.findChildren(QDialog)) == 1
+    first.close()
+
+
 def test_sidebar_footer_stays_visible_when_compact(window, qapp):  # noqa: F811
     window.resize(700, 480)
     qapp.processEvents()

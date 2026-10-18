@@ -6,6 +6,7 @@ gọi `icon()/draw_icon()` và dùng `stylesheet()` do module này tạo.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from string import Template
@@ -487,14 +488,16 @@ def _i_moon(p, c, filled):
 
 
 def _i_gear(p, c, filled):
-    p.drawEllipse(QPointF(12, 12), 3, 3)
-    for k in range(8):
-        p.save()
-        p.translate(12, 12)
-        p.rotate(k * 45)
-        p.drawLine(QPointF(0, -6.5), QPointF(0, -9.5))
-        p.restore()
-    p.drawEllipse(QPointF(12, 12), 6.5, 6.5)
+    # Bánh răng: thân tròn có 8 răng vuông + lỗ giữa (khác hẳn mặt trời là vòng tròn + tia)
+    teeth, r_in, r_out, half = 8, 6.8, 9.6, 0.20  # half: nửa góc (rad) của mỗi răng
+    step = 2 * math.pi / teeth
+    pts = []
+    for k in range(teeth):
+        a = k * step
+        for ang, r in ((a - half * 1.5, r_in), (a - half, r_out), (a + half, r_out), (a + half * 1.5, r_in)):
+            pts.append((12 + r * math.sin(ang), 12 - r * math.cos(ang)))
+    p.drawPolygon(_poly(*pts))
+    p.drawEllipse(QPointF(12, 12), 2.8, 2.8)
 
 
 def _i_pause(p, c, filled):

@@ -344,6 +344,14 @@ class MainWindow(QMainWindow):
         self.prefs.set(theme="light" if theme.current().name == "dark" else "dark")
 
     def open_settings(self) -> SettingsDialog:
+        current = getattr(self, "_settings_dialog", None)
+        try:
+            if current is not None and current.isVisible():  # đang mở: đưa lên trước, không mở thêm
+                current.raise_()
+                current.activateWindow()
+                return current
+        except RuntimeError:  # widget C++ đã bị xóa sau khi đóng
+            pass
         dialog = SettingsDialog(self.history, self.prefs, self)
         dialog.data_changed.connect(self.after_data_deleted)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
