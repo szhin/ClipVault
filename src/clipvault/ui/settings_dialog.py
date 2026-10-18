@@ -15,8 +15,11 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from clipvault.core.limits import Limits
 from clipvault.engine.history import DELETE_SCOPES, HistoryError, HistoryService
-from clipvault.engine.settings import SettingsError, SettingsStore, parse_int
+from clipvault.engine.settings import (
+    MAX_ITEMS_RANGE, MAX_TOTAL_MB_RANGE, RETENTION_DAYS_RANGE, SettingsError, SettingsStore, parse_int,
+)
 from clipvault.ui import theme
 from clipvault.ui.format import format_size
 from clipvault.ui.prefs import Preferences
@@ -76,7 +79,15 @@ class SettingsDialog(QDialog):
         form.addRow("Số mục tối đa", self.max_items_edit)
         form.addRow("Dung lượng tối đa (MB)", self.max_mb_edit)
         form.addRow("Tự xóa mục cũ sau (ngày)", self.days_edit)
-        hint = QLabel("0 = tắt tự xóa. Mục đã ghim luôn được giữ.")
+        for edit, rng in ((self.max_items_edit, MAX_ITEMS_RANGE), (self.max_mb_edit, MAX_TOTAL_MB_RANGE),
+                          (self.days_edit, RETENTION_DAYS_RANGE)):
+            edit.setPlaceholderText(f"{rng[0]:,} – {rng[1]:,}".replace(",", "."))
+        hint = QLabel(
+            f"Tối đa cho phép: {MAX_ITEMS_RANGE[1]:,} mục, {MAX_TOTAL_MB_RANGE[1]:,} MB (1 TB), "
+            f"{RETENTION_DAYS_RANGE[1]:,} ngày. Mỗi mục lưu được tối đa {Limits().max_item_bytes // (1024 * 1024)} MB.\n"
+            "0 ngày = tắt tự xóa. Mục đã ghim luôn được giữ.".replace(",", ".")
+        )
+        hint.setWordWrap(True)
         hint.setObjectName("hint")
         form.addRow("", hint)
         form.addRow("", self.storage_error)
